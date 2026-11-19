@@ -752,23 +752,27 @@ function parseM3U(text) {
 async function loadChannels() {
   const list = document.getElementById('channel-list');
   try {
-    // Try direct first (works on GitHub Pages due to CORS headers on iptv-org)
-    let text;
+    // 1) Lista verificada (channels.json, regenerada cada semana): solo canales que responden
     try {
-      const r = await fetch(PLAYLIST_ES);
-      if (!r.ok) throw new Error('direct failed');
-      text = await r.text();
+      const r = await fetch('channels.json', { cache: 'no-cache' });
+      if (!r.ok) throw new Error('sin channels.json');
+      allChannels = await r.json();
     } catch {
-      // Fallback: use CORS proxy
-      const r2 = await fetch(PROXY + encodeURIComponent(PLAYLIST_ES));
-      if (!r2.ok) throw new Error('proxy failed');
-      text = await r2.text();
+      // 2) Respaldo: lista en vivo de iptv-org (sin comprobar, sin tope)
+      let text;
+      try {
+        const r = await fetch(PLAYLIST_ES);
+        if (!r.ok) throw new Error('direct failed');
+        text = await r.text();
+      } catch {
+        const r2 = await fetch(PROXY + encodeURIComponent(PLAYLIST_ES));
+        if (!r2.ok) throw new Error('proxy failed');
+        text = await r2.text();
+      }
+      const seen = new Set();
+      allChannels = parseM3U(text).filter(c => c.url && c.url.startsWith('https://') &&
+        !/geo-blocked/i.test(c.name) && !seen.has(c.url) && seen.add(c.url));
     }
-
-    let parsed = parseM3U(text).filter(c => c.url);
-    // Keep only https streams for better compatibility on GitHub Pages
-    const secureOnly = parsed.filter(c => c.url.startsWith('https://'));
-    allChannels = (secureOnly.length > 10 ? secureOnly : parsed).slice(0, 600);
 
     buildCategories();
     renderChannels(allChannels);
@@ -785,7 +789,7 @@ function buildCategories() {
   const cats = [...new Set(allChannels.map(c => c.group).filter(Boolean))].sort();
   const scroll = document.getElementById('cat-scroll');
   scroll.innerHTML = `<button class="cat-btn active" data-cat="all">Todos</button>`;
-  cats.slice(0, 25).forEach(cat => {
+  cats.forEach(cat => {
     const btn = document.createElement('button');
     btn.className = 'cat-btn';
     btn.dataset.cat = cat;
